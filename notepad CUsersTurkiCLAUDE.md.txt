@@ -1,5 +1,0 @@
-notepad C:\Users\Turki\CLAUDE.md
-
-## My Projects
-- Premier League Dashboard: C:\Users\Turki\Projects\PremierLeague\pl_dashboard.py
-- Data: C:\Users\Turki\Downloads\archive (1)

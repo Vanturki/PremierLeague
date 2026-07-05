@@ -2,8 +2,8 @@ import sys
 import io
 import time
 import pandas as pd
-from pathlib import Path
 
+from pl_utils import DATA_DIR      # مسار البيانات المشترك (نسبي للمشروع)
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -24,17 +24,16 @@ if sys.platform == "win32":
 
 # ── Setup ──────────────────────────────────────────────────────────────────────
 console = Console(force_terminal=True, highlight=False)
-DATA = Path(r"C:\Users\Turki\Downloads\archive (1)")
 
 # ── Load Data ──────────────────────────────────────────────────────────────────
 def load_data():
-    players = pd.read_csv(DATA / "Squad_PlayerStats__stats_standard.csv")
+    players = pd.read_csv(DATA_DIR / "Squad_PlayerStats__stats_standard.csv")
     players["Goals"]   = pd.to_numeric(players["Performance_Gls"], errors="coerce").fillna(0).astype(int)
     players["Assists"] = pd.to_numeric(players["Performance_Ast"], errors="coerce").fillna(0).astype(int)
     players["G+A"]     = players["Goals"] + players["Assists"]
     players = players[players["Playing Time_MP"] > 0].copy()
 
-    teams = pd.read_csv(DATA / "overwiev__results2024-202591_overall.csv")
+    teams = pd.read_csv(DATA_DIR / "overwiev__results2024-202591_overall.csv")
     for col in ["GF", "GA", "W", "D", "L", "Pts", "GD", "MP"]:
         teams[col] = pd.to_numeric(teams[col], errors="coerce")
 
@@ -320,20 +319,25 @@ def table_attack_defense(teams):
 def show_stat_bars(players, teams):
     section("Season Highlights", "[#]")
 
-    standings = teams.sort_values("Pts", ascending=False).reset_index(drop=True)
-    top_scorer   = players.loc[players["Goals"].idxmax()]
-    top_assister = players.loc[players["Assists"].idxmax()]
-    top_ga_p     = players.loc[players["G+A"].idxmax()]
-    best_team    = standings.iloc[0]
-    arsenal_ga   = int(teams.loc[teams["Squad"] == "Arsenal", "GA"].values[0])
+    standings    = teams.sort_values("Pts", ascending=False).reset_index(drop=True)
+    top_scorer   = players.loc[players["Goals"].idxmax()]        # الهدّاف
+    top_assister = players.loc[players["Assists"].idxmax()]      # صانع الأهداف الأول
+    top_ga_p     = players.loc[players["G+A"].idxmax()]          # الأعلى مساهمة
+    best_team    = standings.iloc[0]                             # المتصدّر
+    best_def     = teams.loc[teams["GA"].idxmin()]              # أفضل دفاع (بدل Arsenal الثابت)
+
+    # الأسماء مستخرجة من البيانات حتى لا تكذب الملصقات إذا تغيّر الموسم
+    scorer_name  = str(top_scorer["Player"]).split()[-1]        # اسم العائلة للاختصار
+    assist_name  = str(top_assister["Player"]).split()[-1]
+    ga_name      = str(top_ga_p["Player"]).split()[-1]
 
     stats = [
-        ("[G]  Salah - Goals",       int(top_scorer["Goals"]),    38,  "#e63946"),
-        ("[>]  Salah - Assists",      int(top_assister["Assists"]),38,  "#457b9d"),
-        ("[!]  Salah - G+A",          int(top_ga_p["G+A"]),        76,  "#2a9d8f"),
-        ("[T]  Liverpool - Points",   int(best_team["Pts"]),       114, "#00ff85"),
-        ("[*]  Liverpool - Goals",    int(best_team["GF"]),        100, "#e9c46a"),
-        ("[D]  Arsenal - Conceded",   arsenal_ga,                   60, "#74b4d4"),
+        (f"[G]  {scorer_name} - Goals",        int(top_scorer["Goals"]),    38,  "#e63946"),
+        (f"[>]  {assist_name} - Assists",      int(top_assister["Assists"]),38,  "#457b9d"),
+        (f"[!]  {ga_name} - G+A",              int(top_ga_p["G+A"]),        76,  "#2a9d8f"),
+        (f"[T]  {best_team['Squad']} - Points", int(best_team["Pts"]),      114, "#00ff85"),
+        (f"[*]  {best_team['Squad']} - Goals",  int(best_team["GF"]),       100, "#e9c46a"),
+        (f"[D]  {best_def['Squad']} - Conceded", int(best_def["GA"]),        60, "#74b4d4"),
     ]
 
     BAR_W = 36

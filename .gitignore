@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ملاحظة: مجلد output/ (الصور + التقرير) مُضمَّن عمداً في المستودع كواجهة عرض للمشروع

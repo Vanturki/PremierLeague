@@ -1,53 +1,28 @@
+"""
+build_report.py — يجمّع تقرير HTML داكن مكتفٍ ذاتياً (الصور مضمّنة base64).
+يقرأ: بيانات CSV من data/ + الصور الست من output/.
+يكتب: output/pl_analysis_report.html
+تنبيه: شغّل analyze_players.py و analyze_teams.py أولاً حتى تتوفّر الصور الست.
+"""
+
 import base64
-import pandas as pd
-from pathlib import Path
 
-DESKTOP = Path(r"C:\Users\Turki\Desktop")
-DATA    = Path(r"C:\Users\Turki\Downloads\archive (1)")
+from pl_utils import OUTPUT_DIR, load_players, load_teams, setup_utf8_stdout
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+
+# ── مساعدات ──────────────────────────────────────────────────────────────────────
 def img_b64(path):
+    """يقرأ صورة ويرجّعها كنص base64 لتضمينها داخل HTML."""
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
-def table_html(df, id_=""):
-    rows = ""
-    for _, r in df.iterrows():
-        cells = "".join(f"<td>{v}</td>" for v in r)
-        rows += f"<tr>{cells}</tr>\n"
-    headers = "".join(f"<th>{c}</th>" for c in df.columns)
-    return f'<table id="{id_}"><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>'
-
-# ── Load data ──────────────────────────────────────────────────────────────────
-players = pd.read_csv(DATA / "Squad_PlayerStats__stats_standard.csv")
-players["Goals"]   = pd.to_numeric(players["Performance_Gls"], errors="coerce").fillna(0)
-players["Assists"] = pd.to_numeric(players["Performance_Ast"], errors="coerce").fillna(0)
-players["G+A"]     = players["Goals"] + players["Assists"]
-players = players[players["Playing Time_MP"] > 0]
-
-teams = pd.read_csv(DATA / "overwiev__results2024-202591_overall.csv")
-for col in ["GF", "GA", "W", "D", "L", "Pts", "GD"]:
-    teams[col] = pd.to_numeric(teams[col], errors="coerce")
-
-# ── Build table data ───────────────────────────────────────────────────────────
-top_goals   = players.nlargest(10, "Goals")[["Player","Squad","Goals"]].reset_index(drop=True)
-top_goals.index += 1
-
-top_assists = players.nlargest(10, "Assists")[["Player","Squad","Assists"]].reset_index(drop=True)
-top_assists.index += 1
-
-top_ga      = players.nlargest(10, "G+A")[["Player","Squad","Goals","Assists","G+A"]].reset_index(drop=True)
-top_ga.index += 1
-
-league_table = teams[["Squad","MP","W","D","L","GF","GA","GD","Pts"]].sort_values("Pts", ascending=False).reset_index(drop=True)
-league_table.index += 1
-league_table.insert(0, "#", league_table.index)
 
 def df_to_html_rows(df):
+    """يبني صفوف جدول مع تمييز المراكز الثلاثة الأولى (ذهبي/فضي/برونزي)."""
     rows = ""
     for i, (_, r) in enumerate(df.iterrows()):
         medal = ""
-        if i == 0: medal = " gold"
+        if i == 0:   medal = " gold"
         elif i == 1: medal = " silver"
         elif i == 2: medal = " bronze"
         cells = "".join(f"<td>{v}</td>" for v in r)
@@ -55,43 +30,98 @@ def df_to_html_rows(df):
     headers = "".join(f"<th>{c}</th>" for c in df.columns)
     return headers, rows
 
+
 def league_rows(df):
+    """يبني صفوف جدول الترتيب مع تلوين مناطق أوروبا والهبوط.
+    ملاحظة: يفترض 20 فريقاً مرتّبة تنازلياً بالنقاط (ترتيب الدوري القياسي)."""
     rows = ""
     for i, (_, r) in enumerate(df.iterrows()):
         cls = ""
-        if i < 4:    cls = "cl"       # Champions League
-        elif i < 6:  cls = "el"       # Europa League
-        elif i < 7:  cls = "conf"     # Conference League
-        elif i >= 17: cls = "rel"     # Relegation
+        if i < 4:      cls = "cl"      # دوري أبطال أوروبا
+        elif i < 6:    cls = "el"      # الدوري الأوروبي
+        elif i < 7:    cls = "conf"    # دوري المؤتمرات
+        elif i >= 17:  cls = "rel"     # الهبوط
         cells = "".join(f"<td>{v}</td>" for v in r)
         rows += f'<tr class="{cls}">{cells}</tr>\n'
     headers = "".join(f"<th>{c}</th>" for c in df.columns)
     return headers, rows
 
-gh, gr = df_to_html_rows(top_goals.reset_index(drop=True))
-ah, ar = df_to_html_rows(top_assists.reset_index(drop=True))
-ch, cr = df_to_html_rows(top_ga.reset_index(drop=True))
-lh, lr = league_rows(league_table)
 
-# ── Encode charts ──────────────────────────────────────────────────────────────
-charts = {k: img_b64(DESKTOP / k) for k in [
-    "top10_goals.png",
-    "top10_assists.png",
-    "top10_goal_contributions.png",
-    "teams_top5_goals_scored.png",
-    "teams_top5_best_defense.png",
-    "teams_wdl_breakdown.png",
-]}
+def main():
+    setup_utf8_stdout()
 
-# ── HTML ───────────────────────────────────────────────────────────────────────
-html = f"""<!DOCTYPE html>
+    # ── تحميل البيانات ──
+    players = load_players()
+    teams = load_teams()
+
+    # ── جداول اللاعبين (أفضل 10) ──
+    top_goals = players.nlargest(10, "Goals")[["Player", "Squad", "Goals"]].reset_index(drop=True)
+    top_goals.index += 1
+    top_assists = players.nlargest(10, "Assists")[["Player", "Squad", "Assists"]].reset_index(drop=True)
+    top_assists.index += 1
+    top_ga = (players.nlargest(10, "Contributions")[["Player", "Squad", "Goals", "Assists", "Contributions"]]
+              .rename(columns={"Contributions": "G+A"}).reset_index(drop=True))
+    top_ga.index += 1
+
+    # ── جدول الترتيب الكامل ──
+    league_table = (teams[["Squad", "MP", "W", "D", "L", "GF", "GA", "GD", "Pts"]]
+                    .sort_values("Pts", ascending=False).reset_index(drop=True))
+    league_table.index += 1
+    league_table.insert(0, "#", league_table.index)
+
+    # ── الأرقام الرئيسية (محسوبة من البيانات، لا مكتوبة يدوياً) ──
+    scorer = players.loc[players["Goals"].idxmax()]           # الهدّاف
+    assister = players.loc[players["Assists"].idxmax()]       # صانع الأهداف الأول
+    contributor = players.loc[players["Contributions"].idxmax()]  # الأعلى مساهمة
+    most_goals_team = teams.loc[teams["GF"].idxmax()]         # أكثر فريق تسجيلاً
+    best_def_team = teams.loc[teams["GA"].idxmin()]           # أفضل دفاع
+    champion = teams.loc[teams["Pts"].idxmax()]               # صاحب أعلى نقاط (البطل)
+
+    stat_cards = [
+        ("c-red",   int(scorer["Goals"]),          "Top Scorer Goals", f"{scorer['Player']} &middot; {scorer['Squad']}"),
+        ("c-blue",  int(assister["Assists"]),       "Top Assister",     f"{assister['Player']} &middot; {assister['Squad']}"),
+        ("c-teal",  int(contributor["Contributions"]), "Best G+A",       f"{contributor['Player']} &middot; {contributor['Squad']}"),
+        ("c-gold",  int(most_goals_team["GF"]),     "Most Goals (Team)", f"{most_goals_team['Squad']}"),
+        ("c-green", int(best_def_team["GA"]),       "Fewest Conceded",   f"{best_def_team['Squad']}"),
+        ("c-red",   int(champion["Pts"]),           "Most Points",       f"{champion['Squad']} &mdash; Champions"),
+    ]
+    stat_cards_html = "".join(
+        f"""      <div class="stat-card">
+        <div class="val {cls}">{val}</div>
+        <div class="lbl">{lbl}</div>
+        <div class="sub">{sub}</div>
+      </div>
+""" for cls, val, lbl, sub in stat_cards
+    )
+
+    # ── بناء صفوف الجداول ──
+    gh, gr = df_to_html_rows(top_goals.reset_index().rename(columns={"index": "#"}))
+    ah, ar = df_to_html_rows(top_assists.reset_index().rename(columns={"index": "#"}))
+    ch, cr = df_to_html_rows(top_ga.reset_index().rename(columns={"index": "#"}))
+    lh, lr = league_rows(league_table)
+
+    # ── ترميز الصور الست ──
+    chart_files = [
+        "top10_goals.png", "top10_assists.png", "top10_goal_contributions.png",
+        "teams_top5_goals_scored.png", "teams_top5_best_defense.png", "teams_wdl_breakdown.png",
+    ]
+    missing = [f for f in chart_files if not (OUTPUT_DIR / f).exists()]
+    if missing:
+        raise FileNotFoundError(
+            "الصور التالية مفقودة — شغّل analyze_players.py و analyze_teams.py أولاً:\n  "
+            + "\n  ".join(missing)
+        )
+    charts = {k: img_b64(OUTPUT_DIR / k) for k in chart_files}
+
+    # ── HTML ──
+    html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Premier League 2024-25 Analysis Report</title>
 <style>
-  /* ── Reset & Base ── */
+  /* -- Reset & Base -- */
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
     font-family: 'Segoe UI', system-ui, sans-serif;
@@ -100,7 +130,7 @@ html = f"""<!DOCTYPE html>
     line-height: 1.6;
   }}
 
-  /* ── Header ── */
+  /* -- Header -- */
   .hero {{
     background: linear-gradient(135deg, #38003c 0%, #00ff85 100%);
     padding: 60px 40px 50px;
@@ -139,7 +169,7 @@ html = f"""<!DOCTYPE html>
     font-size: 1.05rem;
   }}
 
-  /* ── Nav ── */
+  /* -- Nav -- */
   nav {{
     background: #161b22;
     border-bottom: 1px solid #30363d;
@@ -160,7 +190,7 @@ html = f"""<!DOCTYPE html>
   }}
   nav a:hover {{ color: #e6edf3; border-color: #00ff85; }}
 
-  /* ── Layout ── */
+  /* -- Layout -- */
   .container {{ max-width: 1200px; margin: 0 auto; padding: 40px 24px; }}
   .section {{ margin-bottom: 64px; }}
   .section-header {{
@@ -194,7 +224,7 @@ html = f"""<!DOCTYPE html>
     margin-top: 2px;
   }}
 
-  /* ── Cards ── */
+  /* -- Cards -- */
   .card {{
     background: #161b22;
     border: 1px solid #21262d;
@@ -230,7 +260,7 @@ html = f"""<!DOCTYPE html>
     text-align: center;
   }}
 
-  /* ── Tables ── */
+  /* -- Tables -- */
   .table-wrap {{ overflow-x: auto; border-radius: 10px; border: 1px solid #21262d; }}
   table {{ width: 100%; border-collapse: collapse; font-size: 0.9rem; }}
   thead tr {{ background: #0d1117; }}
@@ -256,7 +286,7 @@ html = f"""<!DOCTYPE html>
   .conf td:first-child {{ border-left: 3px solid #2a9d8f; }}
   .rel  td:first-child {{ border-left: 3px solid #e63946; }}
 
-  /* ── Stat summary cards ── */
+  /* -- Stat summary cards -- */
   .stats-grid {{
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -293,7 +323,7 @@ html = f"""<!DOCTYPE html>
   .c-gold  {{ color: #e9c46a; }}
   .c-green {{ color: #00ff85; }}
 
-  /* ── Legend ── */
+  /* -- Legend -- */
   .legend {{
     display: flex;
     gap: 20px;
@@ -309,7 +339,7 @@ html = f"""<!DOCTYPE html>
     display: inline-block;
   }}
 
-  /* ── Footer ── */
+  /* -- Footer -- */
   footer {{
     background: #161b22;
     border-top: 1px solid #21262d;
@@ -340,47 +370,13 @@ html = f"""<!DOCTYPE html>
 
 <div class="container">
 
-  <!-- ════════════════════════════════════════════════════════
-       SECTION 1 — KEY NUMBERS
-  ═════════════════════════════════════════════════════════ -->
+  <!-- SECTION 1 - KEY NUMBERS -->
   <div class="section" id="overview">
     <div class="stats-grid">
-      <div class="stat-card">
-        <div class="val c-red">29</div>
-        <div class="lbl">Top Scorer Goals</div>
-        <div class="sub">Mohamed Salah &middot; Liverpool</div>
-      </div>
-      <div class="stat-card">
-        <div class="val c-blue">18</div>
-        <div class="lbl">Top Assister</div>
-        <div class="sub">Mohamed Salah &middot; Liverpool</div>
-      </div>
-      <div class="stat-card">
-        <div class="val c-teal">47</div>
-        <div class="lbl">Best G+A</div>
-        <div class="sub">Mohamed Salah &middot; Liverpool</div>
-      </div>
-      <div class="stat-card">
-        <div class="val c-gold">86</div>
-        <div class="lbl">Most Goals (Team)</div>
-        <div class="sub">Liverpool</div>
-      </div>
-      <div class="stat-card">
-        <div class="val c-green">34</div>
-        <div class="lbl">Fewest Conceded</div>
-        <div class="sub">Arsenal</div>
-      </div>
-      <div class="stat-card">
-        <div class="val c-red">84</div>
-        <div class="lbl">Most Points</div>
-        <div class="sub">Liverpool &mdash; Champions</div>
-      </div>
-    </div>
+{stat_cards_html}    </div>
   </div>
 
-  <!-- ════════════════════════════════════════════════════════
-       SECTION 2 — PLAYER STATS
-  ═════════════════════════════════════════════════════════ -->
+  <!-- SECTION 2 - PLAYER STATS -->
   <div class="section" id="players">
 
     <div class="section-header">
@@ -413,7 +409,7 @@ html = f"""<!DOCTYPE html>
         <h3 style="margin-bottom:12px;font-size:1rem;color:#e6edf3;">&#127942; Top 10 Scorers</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>#</th>{gh}</tr></thead>
+            <thead><tr>{gh}</tr></thead>
             <tbody>{gr}</tbody>
           </table>
         </div>
@@ -422,7 +418,7 @@ html = f"""<!DOCTYPE html>
         <h3 style="margin-bottom:12px;font-size:1rem;color:#e6edf3;">&#127942; Top 10 Assisters</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>#</th>{ah}</tr></thead>
+            <thead><tr>{ah}</tr></thead>
             <tbody>{ar}</tbody>
           </table>
         </div>
@@ -433,7 +429,7 @@ html = f"""<!DOCTYPE html>
       <h3 style="margin-bottom:12px;font-size:1rem;color:#e6edf3;">&#127942; Top 10 by Goal Contributions (G+A)</h3>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>#</th>{ch}</tr></thead>
+          <thead><tr>{ch}</tr></thead>
           <tbody>{cr}</tbody>
         </table>
       </div>
@@ -441,9 +437,7 @@ html = f"""<!DOCTYPE html>
 
   </div>
 
-  <!-- ════════════════════════════════════════════════════════
-       SECTION 3 — TEAM STATS
-  ═════════════════════════════════════════════════════════ -->
+  <!-- SECTION 3 - TEAM STATS -->
   <div class="section" id="teams">
 
     <div class="section-header">
@@ -472,9 +466,7 @@ html = f"""<!DOCTYPE html>
 
   </div>
 
-  <!-- ════════════════════════════════════════════════════════
-       SECTION 4 — FULL LEAGUE TABLE
-  ═════════════════════════════════════════════════════════ -->
+  <!-- SECTION 4 - FULL LEAGUE TABLE -->
   <div class="section" id="league-table">
 
     <div class="section-header">
@@ -510,7 +502,11 @@ html = f"""<!DOCTYPE html>
 </body>
 </html>"""
 
-out = DESKTOP / "pl_analysis_report.html"
-out.write_text(html, encoding="utf-8")
-print(f"Report saved: {out}")
-print(f"Size: {out.stat().st_size / 1024:.1f} KB")
+    out = OUTPUT_DIR / "pl_analysis_report.html"
+    out.write_text(html, encoding="utf-8")
+    print(f"Report saved: {out}")
+    print(f"Size: {out.stat().st_size / 1024:.1f} KB")
+
+
+if __name__ == "__main__":
+    main()
